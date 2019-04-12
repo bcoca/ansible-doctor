@@ -18,6 +18,7 @@ import stat
 import sys
 import subprocess
 import tempfile
+
 from pprint import pprint
 
 SITE_SCRIPTS = [
@@ -44,6 +45,21 @@ def run_command(args):
     )
     (so, se) = p.communicate()
     return (p.returncode, so, se)
+
+
+def checksum(path):
+
+    from hashlib import sha1
+    b = 65536
+    sha = sha1()
+
+    with open(path, 'rb') as csum:
+        buf = csum.read(b)
+        while len(buf) > 0:
+            sha.update(buf)
+            buf = csum.read(b)
+
+    return sha.hexdigest()
 
 
 class AnsibleInstallLister(object):
@@ -102,6 +118,12 @@ class AnsibleInstallLister(object):
         consoleHandler.setFormatter(logFormatter)
         rootLogger.addHandler(consoleHandler)
 
+    def prep_pip_archive(self, pkg, version):
+        a_dir = None
+        #TODO: download to temp and explode and compiling pyo/c
+        # also return archive dir
+        return a_dir
+
     def get_packages(self):
         packages = {'rpm':[], 'pip': []}
 
@@ -151,14 +173,17 @@ class AnsibleInstallLister(object):
 
                     lines = so.split('\n')
                     infiles = False
+                    archive_dir = None
                     for line in lines:
 
                         if line.startswith('Version:'):
                             version = line.split(None, 1)[-1].strip()
+                            infiles = False
                             continue
 
                         if line.startswith('Location:'):
                             prefix = line.split(None, 1)[-1].strip()
+                            infiles = False
                             continue
 
                         if line.startswith('Files:'):
@@ -166,14 +191,23 @@ class AnsibleInstallLister(object):
                             continue
 
                         if infiles:
-                            fp = line.strip()
-                            fp = os.path.join(prefix, fp)
+                            o_fp = line.strip()
+                            fp = os.path.join(prefix, o_fp)
 
                             if 'cannot locate installed-files.txt' in line.lower():
                                 continue
 
+                            if not archive_dir:
+                                archive_dir = self.prep_pip_archive(pip, version)
+
                             if not os.path.exists(fp):
                                 filechecks.append('M {}'.format(fp))
+                            elif archive_dir:
+                                for ext in ('', 'o', 'c'):
+                                    a_fp = os.path.join(archive_dir, o_fp + ext)
+                                    c_fp = fp + ext
+                                    if os.path.exists(c_fp) and checksum(a_fp) != checksum(c_fp):
+                                        filechecks.append('Checksum mismatch {}'.format(c_fp))
 
                     if prefix not in locations:
                         data = {
